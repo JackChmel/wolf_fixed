@@ -9,4 +9,5 @@ displayName="Wolf Chunk Loader"
 description='''Tame a wolf to load chunks around it!'''
 clientSide = false
 serverSide = true
+mixins="wolfchunkloader.mixins.json"
 
