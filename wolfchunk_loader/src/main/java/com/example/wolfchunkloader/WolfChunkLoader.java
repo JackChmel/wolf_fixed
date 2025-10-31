@@ -1,5 +1,6 @@
 package com.example.wolfchunkloader;
 
+import com.example.wolfchunkloader.mixin.ChunkMapAccessor;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.animal.Cat;
@@ -19,46 +20,49 @@ import java.util.*;
 @Mod.EventBusSubscriber
 public class WolfChunkLoader {
 
-    public WolfChunkLoader() {
-    }
+    public WolfChunkLoader() {}
 
     public static final HashMap<UUID, ChunkPos> WOLF_POSITIONS = new HashMap<>();
     public static final HashMap<UUID, Set<ChunkPos>> WOLF_CHUNKS = new HashMap<>();
     public static final HashMap<ChunkPos, Set<UUID>> CHUNK_WOLVES = new HashMap<>();
 
+    /* -----------------------------------------------------
+       Main ticking: Called every tick for cats & wolves
+    ----------------------------------------------------- */
     @SubscribeEvent
     public static void onLivingTick(LivingEvent.LivingTickEvent event) {
         Entity e = event.getEntity();
-        if (e instanceof TamableAnimal) {
-            TamableAnimal tamable = (TamableAnimal) e;
+        if (e instanceof TamableAnimal tamable) {
             if (tamable.isTame() && (tamable instanceof Wolf || tamable instanceof Cat) && !tamable.level().isClientSide()) {
-                WolfChunkLoader.onMobTick(tamable);
+                onMobTick(tamable);
             }
         }
     }
 
+    /* -----------------------------------------------------
+       When tamed mob is removed → unload chunk tickets
+    ----------------------------------------------------- */
     @SubscribeEvent
     public static void onEntityLeaveWorld(EntityLeaveLevelEvent event) {
         Entity e = event.getEntity();
-        if (e instanceof TamableAnimal) {
-            TamableAnimal tamable = (TamableAnimal) e;
+        if (e instanceof TamableAnimal tamable) {
             if (tamable.isTame() && (tamable instanceof Wolf || tamable instanceof Cat) && !tamable.level().isClientSide()) {
-                WolfChunkLoader.onMobRemoved(tamable);
+                onMobRemoved(tamable);
             }
         }
     }
 
+    /* -----------------------------------------------------
+       When world loads → reapply chunk loading
+    ----------------------------------------------------- */
     @SubscribeEvent
     public static void onWorldLoad(ServerStartedEvent event) {
-        event.getServer().getAllLevels().forEach(level -> {
-            WolfChunkLoader.initializeForWorld(level);
-        });
+        event.getServer().getAllLevels().forEach(WolfChunkLoader::initializeForWorld);
     }
 
     public static void initializeForWorld(ServerLevel level) {
         for (Entity entity : level.getAllEntities()) {
-            if (entity instanceof TamableAnimal) {
-                TamableAnimal tamable = (TamableAnimal) entity;
+            if (entity instanceof TamableAnimal tamable) {
                 if (tamable.isTame() && (tamable instanceof Wolf || tamable instanceof Cat)) {
                     Set<ChunkPos> chunks = getChunksAroundMob(tamable);
                     forceLoadChunks(level, chunks);
@@ -68,11 +72,12 @@ public class WolfChunkLoader {
         }
     }
 
+    /* -----------------------------------------------------
+       When server shuts down → cleanup all forced chunks
+    ----------------------------------------------------- */
     @SubscribeEvent
     public static void onWorldUnload(ServerStoppingEvent event) {
-        event.getServer().getAllLevels().forEach(level -> {
-            WolfChunkLoader.cleanupForWorld(level);
-        });
+        event.getServer().getAllLevels().forEach(WolfChunkLoader::cleanupForWorld);
     }
 
     public static void cleanupForWorld(ServerLevel level) {
@@ -81,15 +86,15 @@ public class WolfChunkLoader {
         for (Map.Entry<UUID, Set<ChunkPos>> entry : WOLF_CHUNKS.entrySet()) {
             UUID id = entry.getKey();
             Set<ChunkPos> chunks = entry.getValue();
-
             Entity entity = level.getEntity(id);
-            if (entity instanceof TamableAnimal) {
-                TamableAnimal tamable = (TamableAnimal) entity;
+
+            if (entity instanceof TamableAnimal tamable) {
                 if ((tamable instanceof Wolf || tamable instanceof Cat) && !chunks.isEmpty()) {
                     toRemove.add(id);
 
                     for (ChunkPos chunk : chunks) {
                         try {
+                            removeEntityTicking(level, chunk);
                             level.setChunkForced(chunk.x, chunk.z, false);
                         } catch (Exception e) {
                             System.err.println("Failed to unforce chunk " + chunk + ": " + e.getMessage());
@@ -108,15 +113,16 @@ public class WolfChunkLoader {
                     Set<UUID> mobSet = CHUNK_WOLVES.get(chunk);
                     if (mobSet != null) {
                         mobSet.remove(id);
-                        if (mobSet.isEmpty()) {
-                            CHUNK_WOLVES.remove(chunk);
-                        }
+                        if (mobSet.isEmpty()) CHUNK_WOLVES.remove(chunk);
                     }
                 }
             }
         }
     }
 
+    /* -----------------------------------------------------
+       Core logic — select 3×3 chunks around mob
+    ----------------------------------------------------- */
     private static Set<ChunkPos> getChunksAroundMob(TamableAnimal mob) {
         ChunkPos center = new ChunkPos(mob.blockPosition());
         Set<ChunkPos> chunkSet = new HashSet<>();
@@ -129,12 +135,19 @@ public class WolfChunkLoader {
         return chunkSet;
     }
 
+    /* -----------------------------------------------------
+       Apply chunk forcing + entity ticking
+    ----------------------------------------------------- */
     private static void forceLoadChunks(ServerLevel level, Set<ChunkPos> chunks) {
         for (ChunkPos chunk : chunks) {
+            addEntityTicking(level, chunk);
             level.setChunkForced(chunk.x, chunk.z, true);
         }
     }
 
+    /* -----------------------------------------------------
+       Entity moves → update loaded chunks
+    ----------------------------------------------------- */
     public static void onMobTick(TamableAnimal mob) {
         UUID id = mob.getUUID();
         ChunkPos currentChunk = new ChunkPos(mob.blockPosition());
@@ -161,7 +174,9 @@ public class WolfChunkLoader {
 
         for (ChunkPos chunk : chunksToUnload) {
             removeMobFromChunk(id, chunk);
+
             if (!CHUNK_WOLVES.containsKey(chunk) || CHUNK_WOLVES.get(chunk).isEmpty()) {
+                removeEntityTicking(level, chunk);
                 level.setChunkForced(chunk.x, chunk.z, false);
                 CHUNK_WOLVES.remove(chunk);
             }
@@ -169,6 +184,7 @@ public class WolfChunkLoader {
 
         for (ChunkPos chunk : chunksToLoad) {
             addMobToChunk(id, chunk);
+            addEntityTicking(level, chunk);
             level.setChunkForced(chunk.x, chunk.z, true);
         }
 
@@ -181,11 +197,12 @@ public class WolfChunkLoader {
 
     private static void removeMobFromChunk(UUID id, ChunkPos chunk) {
         Set<UUID> mobSet = CHUNK_WOLVES.get(chunk);
-        if (mobSet != null) {
-            mobSet.remove(id);
-        }
+        if (mobSet != null) mobSet.remove(id);
     }
 
+    /* -----------------------------------------------------
+       When mob disappears → unload tickets
+    ----------------------------------------------------- */
     public static void onMobRemoved(TamableAnimal mob) {
         UUID id = mob.getUUID();
         Set<ChunkPos> chunks = WOLF_CHUNKS.remove(id);
@@ -193,13 +210,30 @@ public class WolfChunkLoader {
 
         if (chunks != null) {
             ServerLevel level = (ServerLevel) mob.level();
+
             for (ChunkPos chunk : chunks) {
                 removeMobFromChunk(id, chunk);
+
                 if (!CHUNK_WOLVES.containsKey(chunk) || CHUNK_WOLVES.get(chunk).isEmpty()) {
+                    removeEntityTicking(level, chunk);
                     level.setChunkForced(chunk.x, chunk.z, false);
                     CHUNK_WOLVES.remove(chunk);
                 }
             }
         }
+    }
+
+    /* -----------------------------------------------------
+       ENTITY TICKING TICKET – added minimal way
+    ----------------------------------------------------- */
+    private static void addEntityTicking(ServerLevel level, ChunkPos pos) {
+        ((ChunkMapAccessor) level.getChunkSource().chunkMap)
+                .callAddRegionTicket(WolfChunkLoaderTickets.ENTITY_TICKING, pos, 31, pos);
+    }
+
+    private static void removeEntityTicking(ServerLevel level, ChunkPos pos) {
+        level.getChunkSource().removeRegionTicket(
+                WolfChunkLoaderTickets.ENTITY_TICKING, pos, 31, pos
+        );
     }
 }
