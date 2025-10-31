@@ -1,0 +1,52 @@
+plugins {
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+    id 'eclipse'
+    id 'maven-publish'
+}
+
+group = 'com.example' // libovolné, třeba tvoje jméno/doména
+version = '1.0.0'
+archivesBaseName = 'wolfchunkloader'
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+minecraft {
+    mappings channel: 'official', version: '1.20.1'
+
+    // Konfigurace běhu klienta/serveru
+    runs {
+        server {
+            workingDirectory project.file('run')
+            mods {
+                wolfchunkloader {
+                    source sourceSets.main
+                }
+            }
+        }
+    }
+}
+
+repositories {
+    // Forge maven je standardně přidán Forge pluginem
+}
+
+dependencies {
+    minecraft 'net.minecraftforge:forge:1.20.1-47.4.0'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 17
+}
+
+jar {
+    manifest {
+        attributes([
+            "Specification-Title": "wolfchunkloader",
+            "Specification-Vendor": "example",
+            "Implementation-Title": project.name,
+            "Implementation-Version": project.version,
+            "Implementation-Vendor": "example"
+        ])
+    }
+}

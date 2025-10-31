@@ -1,0 +1,14 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="MIT"
+
+[[mods]]
+modId="wolfchunkloader"
+version="2.0.0"
+displayName="Wolf Chunk Loader"
+description='''Tame a wolf to load chunks around it!'''
+# DŮLEŽITÉ:
+# Říká Forge že mod NENÍ potřeba na klientovi
+# ale je povinný na serveru.
+clientSide = false
+serverSide = true
