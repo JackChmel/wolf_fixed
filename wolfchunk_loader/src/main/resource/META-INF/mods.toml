@@ -4,8 +4,9 @@ license="MIT"
 
 [[mods]]
 modId="wolfchunkloader"
-version="2.0.0"
+version="3.0.0"
 displayName="Wolf Chunk Loader"
 description='''Tame a wolf to load chunks around it!'''
 clientSide = false
 serverSide = true
+
